@@ -56,4 +56,6 @@ Thumbs.db
 # ==============================
 *.json
 credentials.json
+server/config/*
 service_account*.json
+server/config/google_credentials.json

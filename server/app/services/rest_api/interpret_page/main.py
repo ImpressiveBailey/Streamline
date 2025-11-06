@@ -1,4 +1,4 @@
-from app.services.google.GoogleServiceHelper import GoogleServiceHelper
+from server.app.services.google.GoogleServiceHelper import GoogleServiceHelper
 
 SERVICE_ACCOUNT_FILE = 'service-account.json'
 helper = GoogleServiceHelper(SERVICE_ACCOUNT_FILE)
