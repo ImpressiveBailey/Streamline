@@ -7,6 +7,10 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import html
 
+# TEMPLATE + SERVICE ACCOUNT
+# googledocfetcher@content-automations-477404.iam.gserviceaccount.com
+# https://docs.google.com/document/d/14pFIkIPGpcoEV2DDWESGd7OGIUTT3ls1MF_nJQMV_zU/edit?usp=sharing
+
 log = logging.getLogger(__name__)
 _DOCS_SCOPE = ["https://www.googleapis.com/auth/documents.readonly"]
 

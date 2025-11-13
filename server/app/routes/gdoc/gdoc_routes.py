@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 import logging
 from server.app.services.google.GoogleServiceHelper import GoogleServiceHelper
 from server.app.utils.formatters.parsing import extract_doc_id
+from server.app.services.rest_api.interpret_page.main import interpret_page
 
 routes = Blueprint("gdoc", __name__)
 log = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ def health():
     }), 200
 
 @routes.route("/fetch", methods=["POST"])
-def fetch_doc():
+def fetch_google_doc():
     """
     Body: {
       "url": "https://docs.google.com/document/d/<id>/edit"   // or "doc_id"
@@ -42,6 +43,7 @@ def fetch_doc():
         content, source = google_helper.fetch_doc_text(doc_id)
     else:
         content, source = google_helper.fetch_doc_html(doc_id)
+        content = interpret_page(content)
 
     if content is None:
         return jsonify({
