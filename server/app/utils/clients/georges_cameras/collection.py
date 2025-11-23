@@ -2,6 +2,8 @@
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 import json
+from server.app.utils.formatters.parsing import html_to_richtext
+from server.app.utils.formatters.shopify_data import format_faqs
 
 def _extract_handle(url: str) -> str:
     """
@@ -61,8 +63,14 @@ MANIFEST = {
       "upload": {"metafield": "body_html"}
     },
     {
-      "label": "Bottom Content",
-      "path": "data.bottomContentHtml",
+      "label": "Bottom Content Visible",
+      "path": "data.bottomContentVisibleHtml",
+      "type": "html",
+      "upload": {"metafield": "custom.bottom_description"}
+    },
+    {
+      "label": "Bottom Content Hidden",
+      "path": "data.bottomContentHiddenHtml",
       "type": "html",
       "upload": {"metafield": "custom.bottom_description"}
     },
@@ -137,12 +145,10 @@ def format_page(page: dict) -> dict:
             faqs = items
 
         # -------- Bottom: all content after first H2/H3 EXCLUDING the FAQ block --------
-        # Build bottom by walking siblings after H1 again, skipping the FAQ region.
         collect = False
         in_faq_block = False
         bottom_chunks = []
 
-        # We’ll use identity checks to know when we hit faq_header.
         for sib in h1.next_siblings:
             nm = getattr(sib, "name", None)
 
@@ -165,13 +171,53 @@ def format_page(page: dict) -> dict:
                     in_faq_block = False
                     # include this H2 (the next section) in bottom
                     bottom_chunks.append(str(sib))
-                # otherwise keep skipping
                 continue
 
             # Normal bottom collection (non-FAQ region)
             bottom_chunks.append(str(sib))
 
         bottom_html = "".join(bottom_chunks).strip()
+
+    # -------- Split bottom_html into visible/hidden parts --------
+    bottom_content_visible = bottom_html
+    bottom_content_hidden = ""
+
+    if bottom_html:
+        bottom_soup = BeautifulSoup(bottom_html, "html.parser")
+        children = list(bottom_soup.children)
+
+        words_so_far = 0
+        split_index = len(children)  # default: all visible
+
+        for idx, child in enumerate(children):
+            # Get text from this node
+            if isinstance(child, str):
+                text = child.strip()
+            else:
+                text = child.get_text(" ", strip=True)
+
+            if text:
+                words_so_far += len(text.split())
+
+            # Once we've reached 150+ words, find the next header
+            if words_so_far >= 100:
+                header_idx = None
+                for j in range(idx + 1, len(children)):
+                    nm = getattr(children[j], "name", None)
+                    if nm in ("h2", "h3", "h4"):
+                        header_idx = j
+                        break
+
+                if header_idx is not None:
+                    split_index = header_idx  # break before this header
+                # If no further header, everything stays visible
+                break
+
+        visible_nodes = children[:split_index]
+        hidden_nodes = children[split_index:]
+
+        bottom_content_visible = "".join(str(n) for n in visible_nodes).strip()
+        bottom_content_hidden = "".join(str(n) for n in hidden_nodes).strip()
 
     return (
         {
@@ -187,7 +233,9 @@ def format_page(page: dict) -> dict:
 
             # Content
             "topContentHtml": top_html,
-            "bottomContentHtml": bottom_html,
+            "bottomContentHtml": bottom_html,  # full bottom for reference
+            "bottomContentVisibleHtml": bottom_content_visible,
+            "bottomContentHiddenHtml": bottom_content_hidden,
             "faq": faqs,
         },
         MANIFEST,
@@ -223,22 +271,27 @@ def format_csv(page: dict):
     handle = _extract_handle_from_url(page_url)
     faqs = data.get("faq") or []
 
+    bc_visible = html_to_richtext(data.get("bottomContentVisibleHtml", ""))
+    bc_hidden = html_to_richtext(data.get("bottomContentHiddenHtml", ""))
+
+    faq_rows, faq_refs = format_faqs(faqs, handle)
     # IMPORTANT: keys here are the **exact** CSV column headers you wanted.
-    row = {
-        "Handle": handle,                                     # derived from URL
-        "Command": "MERGE",                                   
-        "Published": "TRUE",                                  
+    collection_row = {
+        "Handle": handle,
+        "Command": "MERGE",                                                                    
         "Title": data.get("pageHeading", "") or "",
-        "SEO Title": data.get("metaTitle", "") or "",
-        "SEO Description": data.get("metaDescription", "") or "",
-        "body_html": data.get("topContentHtml", "") or "",
-        "Bottom Content": data.get("bottomContentHtml", "") or "",
+        "Metafield: title_tag [string]": data.get("metaTitle", "") or "",
+        "Metafield: description_tag [string]": data.get("metaDescription", "") or "",
+        "Body HTML": data.get("topContentHtml", "") or "",
+        "Metafield: custom.bottom_content_visible [rich_text_field]": json.dumps(bc_visible, ensure_ascii=False),
+        "Metafield: custom.bottom_content_hidden [rich_text_field]": json.dumps(bc_hidden, ensure_ascii=False),
+        
         # FAQs as JSON array of {q, a}
-        "FAQs": json.dumps(faqs, ensure_ascii=False),
+        "Metafield: custom.faqs [list.metaobject_reference]": ", ".join(faq_refs),
     }
 
     # Single row for this page
-    return [row]
+    return {'collection': [collection_row], 'faq': faq_rows}
 
 
 

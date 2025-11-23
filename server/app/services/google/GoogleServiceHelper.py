@@ -1,4 +1,3 @@
-import os
 import logging
 from typing import Optional, Tuple
 import requests
@@ -7,55 +6,57 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import html
 
-# TEMPLATE + SERVICE ACCOUNT
-# googledocfetcher@content-automations-477404.iam.gserviceaccount.com
-# https://docs.google.com/document/d/14pFIkIPGpcoEV2DDWESGd7OGIUTT3ls1MF_nJQMV_zU/edit?usp=sharing
+from server.config.ConfigHelper import ConfigHelper
 
 log = logging.getLogger(__name__)
 _DOCS_SCOPE = ["https://www.googleapis.com/auth/documents.readonly"]
 
-def _default_sa_path() -> str:
-    here = os.path.dirname(os.path.abspath(__file__))   # e.g., …/server/app/services/google
-    root = os.path.normpath(os.path.join(here, "..", "..", ".."))  # -> …/server
-    return os.path.join(root, "config", "google_credentials.json")
 
 class GoogleServiceHelper:
-    def __init__(self, sa_path: Optional[str] = None):
-        env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        self.sa_path = sa_path or env_path or _default_sa_path()
+    def __init__(self):
         self._docs_client = None
 
     @property
     def is_configured(self) -> bool:
-        return bool(self.sa_path and os.path.exists(self.sa_path))
+        """Returns True if GOOGLE_DOC_SERVICE_ACCOUNT_CONFIG exists and is valid JSON."""
+        return ConfigHelper.get_google_sa_json() is not None
 
     def docs_client(self):
+        """Build and cache the Google Docs API client."""
         if self._docs_client is not None:
             return self._docs_client
-        if not self.is_configured:
-            log.info("Google service account not configured or missing file.")
+
+        info = ConfigHelper.get_google_sa_json()
+        if not info:
+            log.info("Google Docs credentials not found in environment.")
             return None
-        creds = service_account.Credentials.from_service_account_file(
-            self.sa_path, scopes=_DOCS_SCOPE
+
+        try:
+            creds = service_account.Credentials.from_service_account_info(
+                info, scopes=_DOCS_SCOPE
+            )
+        except Exception as e:
+            log.error("Failed to create service account credentials: %s", e)
+            return None
+
+        self._docs_client = build(
+            "docs", "v1", credentials=creds, cache_discovery=False
         )
-        self._docs_client = build("docs", "v1", credentials=creds, cache_discovery=False)
         return self._docs_client
 
     # ---------- PUBLIC API ----------
     def fetch_doc_text(self, doc_id: str) -> Tuple[Optional[str], Optional[str]]:
-        """Legacy: plain text. Keeping for completeness."""
         text = self._try_docs_api_text(doc_id)
         if text:
             return text, "service_account"
+
         text = self._try_public_export_text(doc_id)
         if text:
             return text, "public"
+
         return None, None
 
     def fetch_doc_html(self, doc_id: str) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Returns (html, source) where source ∈ {'service_account','public',None}.
-        """
         html_str = self._try_docs_api_html(doc_id)
         if html_str:
             return html_str, "service_account"
@@ -76,10 +77,9 @@ class GoogleServiceHelper:
             return self._flatten_text(doc)
         except HttpError as e:
             log.warning("Docs API error for %s: %s", doc_id, e)
-            return None
         except Exception as e:
             log.exception("Unexpected Docs API error for %s: %s", doc_id, e)
-            return None
+        return None
 
     def _try_docs_api_html(self, doc_id: str) -> Optional[str]:
         client = self.docs_client()
@@ -90,10 +90,9 @@ class GoogleServiceHelper:
             return self._render_html(doc)
         except HttpError as e:
             log.warning("Docs API error for %s: %s", doc_id, e)
-            return None
         except Exception as e:
             log.exception("Unexpected Docs API error for %s: %s", doc_id, e)
-            return None
+        return None
 
     # ---------- INTERNAL: Public export fallbacks ----------
     @staticmethod

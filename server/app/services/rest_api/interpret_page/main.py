@@ -4,6 +4,9 @@ from bs4 import BeautifulSoup, Tag
 from urllib.parse import urlparse, parse_qs, unquote
 
 PAGE_MARKER_RE = re.compile(r"^\s*Page\s+(\d+)\s*$", re.I)
+EXCLUSION_TERMS = [
+    "na", "n/a", "none"
+]
 
 def _t(el: Optional[Tag]) -> str:
     return (el.get_text(" ", strip=True) if el else "").strip()
@@ -114,6 +117,7 @@ def _extract_meta_and_find_h1(marker: Tag) -> Tuple[Dict[str, Optional[str]], Op
             m = re.match(r"^\s*Meta title\s*:\s*(.+)$", txt, re.I)
             if m:
                 meta_title = m.group(1).strip()
+                if meta_title.lower() in EXCLUSION_TERMS: meta_title = None
                 continue
 
         if meta_desc is None:
